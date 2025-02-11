@@ -4,7 +4,7 @@ from oandapyV20.exceptions import V20Error
 from oandapyV20.endpoints.instruments import InstrumentsCandles
 import pandas as pd
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, time, timezone, timedelta
 import os
 
 # OANDA API credentials
@@ -17,6 +17,37 @@ api = API(access_token=ACCESS_TOKEN)
 
 # File to store breakout data
 BREAKOUT_CSV = "breakout_data.csv"
+
+# Function to check if bullish candle
+def is_bullish(candle):
+    return candle["open"] > candle["close"]
+
+# Function to check if bearish candle
+def is_bearish(candle):
+    return candle["open"] < candle["close"]
+
+# Function to check if candle is in london session
+def is_in_london_session(candle):
+    """Checks if a candle's time (UTC) falls within the London session (10 AM - 4 PM UTC)."""
+
+    candle_time = candle["time"]
+
+    # Handle string times (if needed):
+    if isinstance(candle_time, str):
+        candle_time = datetime.fromisoformat(candle_time.replace('Z', '+00:00')) # Handles 'Z' for UTC
+    
+    # Ensure the datetime object is timezone-aware. If it's naive, assume UTC.
+    if candle_time.tzinfo is None:
+      candle_time = candle_time.replace(tzinfo=timezone.utc)
+
+    start_time = time(10, 0, 0, tzinfo=timezone.utc)  # 10:00 AM UTC (timezone-aware)
+    end_time = time(16, 0, 0, tzinfo=timezone.utc)    # 4:00 PM UTC (timezone-aware)
+
+    start_datetime = datetime.combine(candle_time.date(), start_time)
+    end_datetime = datetime.combine(candle_time.date(), end_time)
+
+    return start_datetime <= candle_time <= end_datetime
+
 
 # Function to fetch candlestick data
 def fetch_candlestick_data(start_time, end_time):
@@ -116,6 +147,7 @@ def detect_support_resistance(df, num_candles=100):
         # Check if the previous candle is bearish and the current candle is bullish
         elif previous_candle["close"] < previous_candle["open"] and current_candle["close"] > current_candle["open"]:
             new_support = previous_candle["close"]
+
             if support is None or support >= new_support >= support - 2.0:
                 support = new_support
                 # print(f"New Support Level: {support}")
@@ -129,12 +161,14 @@ def check_breakout(candle, support, resistance):
 
     # Check for resistance breakout
     if resistance is not None and open_price < resistance and close_price > resistance:
-        print(f"Resistance broken at {resistance}!")
+        # print(candle["time"])
+        print(f"{candle['time']} -  Resistance broken at {resistance}")
         return "resistance"
 
     # Check for support breakout
     if support is not None and open_price > support and close_price < support:
-        print(f"Support broken at {support}!")
+        # print(candle["time"])
+        print(f"{candle['time']} -  Support broken at {support}")
         return "support"
 
     # No breakout
@@ -143,18 +177,6 @@ def check_breakout(candle, support, resistance):
 # Function to log breakout data to a CSV file
 def log_breakout_to_csv(candle, candle1, candle2, candle3, candle4, breakout_type, support, resistance):
     # Create a dictionary with the breakout data
-    # breakout_data = {
-    #     "time": candle["time"],
-    #     "open": candle["open"],
-    #     "high": candle["high"],
-    #     "low": candle["low"],
-    #     "close": candle["close"],
-    #     "volume": candle["volume"],
-    #     "breakout_type": breakout_type,
-    #     "support_level": support,
-    #     "resistance_level": resistance,
-    # }
-
     breakout_data = {
         "time": candle["time"],
         "size": abs(candle["close"]-candle["open"]),
@@ -234,29 +256,34 @@ def backtest(start_time, end_time):
     # Iterate through the historical data one candle at a time
     for i in range(len(df)):
         candle = df.iloc[i]
-        print(f"Processing candle at {candle['time']}...")
 
-        # Update support and resistance levels using the last 100 candles
-        if i >= 100:
-            support, resistance = detect_support_resistance(df.iloc[:i], num_candles=100)
+        # Check if candle is in London session only
+        if is_in_london_session(candle):
 
-        # Check for breakouts
-        breakout = check_breakout(candle, support, resistance)
-        if breakout:
-            print(f"Breakout detected: {breakout}")
+            # Update support and resistance levels using the last 100 candles
+            if i >= 100:
+                support, resistance = detect_support_resistance(df.iloc[:i], num_candles=100)
 
-            if i + 1 < len(df):
-                next_candle = df.iloc[i + 1]
+            # Check for breakouts
+            breakout = check_breakout(candle, support, resistance)
+            if breakout:
+                # print(f"Breakout detected: {breakout}")
 
-                candle1 = candle
-                candle2 = df.iloc[i-1]
-                candle3 = df.iloc[i-2]
-                candle4 = df.iloc[i-3]
+                if i + 1 < len(df):
+                    next_candle = df.iloc[i + 1]
 
-                # Log the breakout to the CSV file
-                log_breakout_to_csv(next_candle, candle1, candle2, candle3, candle4, breakout, support, resistance)
+                    #Check if breaking candle and next candle are same direction
+                    if (is_bullish(candle) and is_bullish(next_candle))  or (is_bearish(candle) and is_bearish(next_candle)):
 
-                i += 1
+                        candle1 = candle
+                        candle2 = df.iloc[i-1]
+                        candle3 = df.iloc[i-2]
+                        candle4 = df.iloc[i-3]
+
+                        # Log the breakout to the CSV file
+                        # log_breakout_to_csv(next_candle, candle1, candle2, candle3, candle4, breakout, support, resistance)
+
+                        i += 1
 
     print("Backtest complete.")
 
@@ -268,8 +295,8 @@ def backtest(start_time, end_time):
 
 
 # Define the backtest period
-start_time = "2023-10-01T00:00:00Z"
-end_time =   "2023-12-31T23:59:59Z"  
+start_time = "2024-10-01T00:00:00Z"
+end_time =   "2024-12-31T23:59:59Z"  
 
 # Run the backtest
 backtest(start_time, end_time)

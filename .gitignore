@@ -2,3 +2,4 @@
 /venv
 /__pycache__
 /src/api/__pycache__
+*.pyc
