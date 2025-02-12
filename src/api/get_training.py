@@ -4,7 +4,7 @@ from oandapyV20.exceptions import V20Error
 from oandapyV20.endpoints.instruments import InstrumentsCandles
 import pandas as pd
 import time
-from datetime import datetime, time, timezone, timedelta
+import datetime
 import os
 
 # OANDA API credentials
@@ -16,7 +16,8 @@ INSTRUMENT = "XAU_USD"
 api = API(access_token=ACCESS_TOKEN)
 
 # File to store breakout data
-BREAKOUT_CSV = "breakout_data.csv"
+# BREAKOUT_CSV = "breakout_data.csv"
+BREAKOUT_CSV = "data.csv"
 
 # Function to check if bullish candle
 def is_bullish(candle):
@@ -34,17 +35,17 @@ def is_in_london_session(candle):
 
     # Handle string times (if needed):
     if isinstance(candle_time, str):
-        candle_time = datetime.fromisoformat(candle_time.replace('Z', '+00:00')) # Handles 'Z' for UTC
+        candle_time = datetime.datetime.fromisoformat(candle_time.replace('Z', '+00:00')) # Handles 'Z' for UTC
     
     # Ensure the datetime object is timezone-aware. If it's naive, assume UTC.
     if candle_time.tzinfo is None:
-      candle_time = candle_time.replace(tzinfo=timezone.utc)
+      candle_time = candle_time.replace(tzinfo=datetime.timezone.utc)
 
-    start_time = time(10, 0, 0, tzinfo=timezone.utc)  # 10:00 AM UTC (timezone-aware)
-    end_time = time(16, 0, 0, tzinfo=timezone.utc)    # 4:00 PM UTC (timezone-aware)
+    start_time = datetime.time(10, 0, 0, tzinfo=datetime.timezone.utc)  # 10:00 AM UTC (timezone-aware)
+    end_time = datetime.time(16, 0, 0, tzinfo=datetime.timezone.utc)    # 4:00 PM UTC (timezone-aware)
 
-    start_datetime = datetime.combine(candle_time.date(), start_time)
-    end_datetime = datetime.combine(candle_time.date(), end_time)
+    start_datetime = datetime.datetime.combine(candle_time.date(), start_time)
+    end_datetime = datetime.datetime.combine(candle_time.date(), end_time)
 
     return start_datetime <= candle_time <= end_datetime
 
@@ -125,6 +126,38 @@ def fetch_historical_data(start_time, end_time, granularity="M30"):
         print(f"An error occurred while fetching data: {e}")
         return None
 
+
+# Function to get multiple api requests
+def fetch_multiple_data(start_date_str, end_date_str):  # Accept date strings
+    # Start with empty DataFrame
+    all_df = pd.DataFrame()
+
+    # Convert date strings to datetime.date objects
+    start_date = datetime.datetime.strptime(start_date_str, "%Y-%m-%d").date() # Example format, adjust if needed
+    end_date = datetime.datetime.strptime(end_date_str, "%Y-%m-%d").date()   # Example format, adjust if needed
+
+    current_date = start_date
+
+    while current_date < end_date:
+        # Request data for 90 days at a time
+        period_end = current_date + datetime.timedelta(days=90)
+        
+        if period_end > end_date:
+            period_end = end_date
+
+        data = fetch_historical_data(current_date, period_end)
+
+        # print("Type: ", type(data))
+
+        if isinstance(data, pd.DataFrame): # Check if data is a DataFrame before concatenation
+            all_df = pd.concat([all_df, data], ignore_index=True) # Concatenate DataFrames
+        elif data is not None: # Handle other data types or None as needed
+            print("Data is not a DataFrame, skipping concatenation.")
+            print(data) # Print or log the non-DataFrame data for debugging
+
+        current_date = period_end
+
+    return all_df
 
 # Function to detect support and resistance levels
 def detect_support_resistance(df, num_candles=100):
@@ -244,7 +277,9 @@ def backtest(start_time, end_time):
     print(f"Starting backtest from {start_time} to {end_time}...")
 
     # Fetch historical data for the specified period
-    df = fetch_historical_data(start_time, end_time)
+    # df = fetch_historical_data(start_time, end_time)
+    df = fetch_multiple_data(start_time, end_time)
+
     if df is None:
         print("Failed to fetch historical data. Exiting...")
         return
@@ -281,7 +316,7 @@ def backtest(start_time, end_time):
                         candle4 = df.iloc[i-3]
 
                         # Log the breakout to the CSV file
-                        # log_breakout_to_csv(next_candle, candle1, candle2, candle3, candle4, breakout, support, resistance)
+                        log_breakout_to_csv(next_candle, candle1, candle2, candle3, candle4, breakout, support, resistance)
 
                         i += 1
 
@@ -294,18 +329,8 @@ def backtest(start_time, end_time):
 # run_continuously()
 
 
-# Define the backtest period
-start_time = "2024-10-01T00:00:00Z"
-end_time =   "2024-12-31T23:59:59Z"  
+start_date_str = "2024-01-01"
+end_date_str = "2024-12-31"
 
 # Run the backtest
-backtest(start_time, end_time)
-
-
-
-
-
-
-
-
-
+backtest(start_date_str, end_date_str)

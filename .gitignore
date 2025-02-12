@@ -3,3 +3,4 @@
 /__pycache__
 /src/api/__pycache__
 *.pyc
+/src/api/data.csv
